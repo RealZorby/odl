@@ -24,6 +24,7 @@ _str = str
 _list = list
 _tuple = tuple
 
+
 class int(_int):
     """ODL 'int' class"""
 

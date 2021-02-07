@@ -6,7 +6,7 @@ def compile(string, globs={}):
     return compiler_obj.compile(string, globs)
 
 def load(path, globs={}):
-    """Opens a specified (rel/abs) file and compiles its content."""
+    """Opens a specified (rel/abs) file and compiles its contents."""
 
     try:
         file = open(path)

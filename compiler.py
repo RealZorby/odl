@@ -67,8 +67,6 @@ class Compiler:
                     out.append(cur_obj[:-1])
                 cur_obj = line + "\n"
         
-        newline = "\n"
-        
         if cur_obj and cur_obj != "\n":
             out.append(cur_obj[:-1])
         return out
@@ -80,16 +78,12 @@ class Compiler:
             name, token = self.construct_object(obj, path)
             self.tokens.append(token)
 
-    def split_header(self, string):
-        header = string[1:-1]
-        pieces = header.split()
-        cls_name, name = pieces[0:2]
-        args_string = "".join(list(map(lambda x: x+" ", pieces[2:])))[:-1]
+    def split_args(self, string):
         args = []
 
         cur_arg = ""
         recrusion = 0
-        for char in args_string:
+        for char in string:
 
             cur_arg += char
             if char == "<":
@@ -103,23 +97,47 @@ class Compiler:
         if cur_arg:
             args.append(cur_arg)
         
-        return cls_name, name, args
+        return args
 
-    def construct_header(self, string):
-        cls_name, name, args = self.split_header(string)
+    def construct_args(self, args):
         mentions = []
         tokens = []
 
         for arg in args:
             if arg[0] == "@":
-                mentions.append(arg[1:])
+                mentions.append(builtin.mention(arg[1:]))
                 tokens.append(builtin.mention(arg[1:]))
             elif re.match(r"[0-9\.]+", arg):
                 tokens.append(builtin.int(arg))
             elif re.match(r"[\"'].*[\"']", arg):
                 tokens.append(builtin.str(arg[1:-1]))
             elif arg[0] == "<":
-                tokens.append(self.construct_object(arg, ""))
+                tokens.append(self.construct_object(arg, "")[1])
+        
+        return tokens, mentions
+
+    def split_header(self, string):
+        header = string[1:-1]
+        pieces = header.split()
+        cls_name, name = pieces[0:2]
+        args_string = "".join(list(map(lambda x: x+" ", pieces[2:])))[:-1]
+
+        try:
+            args_func = eval(f"self.modules.{cls_name}.__odl_split_args__")
+            args = args_func(args_string)
+        except:
+            args = self.split_args(args_string)
+        
+        return cls_name, name, args
+
+    def construct_header(self, string):
+        cls_name, name, args = self.split_header(string)
+
+        try:
+            args_func = eval(f"self.modules.{cls_name}.__odl_construct_args__")
+            tokens, mentions = args_func(args)
+        except:
+            tokens, mentions = self.construct_args(args)
         
         return cls_name, name, tokens, mentions
 
@@ -149,12 +167,13 @@ class Compiler:
     def construct_object(self, string, path):
         header, body = self.split_object(string)
         cls_name, name, args, mentions = self.construct_header(header)
-        path += "." + name
+        if len(path): path += "." + name
+        else: path += name
         token = self.Token(path, cls_name, name, args, mentions)
         body = shorten_indent(body)
 
         try:
-            body_func = eval(f"self.modules.{cls_name}.ODL.construct_body")
+            body_func = eval(f"self.modules.{cls_name}.__odl_construct_body__")
             body_func(token, body, path, self)
         except:
             self.construct_body(token, body, path)
@@ -164,22 +183,24 @@ class Compiler:
         if not token.sorted:
             new.insert(0, token)
             token.sorted = True
-            if len(token.mentions):
-                for mention in token.mentions:
-                    try:
-                        eval(f"self.modules.{mention}")
-                    except AttributeError:
-                        for t in self.tokens:
-                            if t.path == mention:
-                                self.sort_token(t, new)
-                                break
+            for mention in token.mentions:
+                try:
+                    eval(f"self.modules.{mention.path}")
+                except AttributeError:
+                    for t in self.tokens:
+                        print(f"here <{t.path}> <{mention.path}>")
+                        if t.path == mention.path:
+                            print("yes")
+                            self.sort_token(t, new)
+                            break
 
     def sort_tokens(self):
         new = []
-        x = 0
+
         for token in self.tokens:
             self.sort_token(token, new)
         
+        print(*new)
         return new
 
     def bake_object(self, obj):
@@ -189,11 +210,10 @@ class Compiler:
         for arg in obj.args:
             if isinstance(arg, builtin.mention):
                 try:
-                    objects.append(eval("self.modules" + arg.path))
+                    objects.append(eval("self.modules." + arg.path))
                 except AttributeError:
                     objects.append(eval("self.root." + arg.path))
             elif isinstance(arg, Compiler.Token):
-                print("there")
                 objects.append(self.bake_object(arg))
             else:
                 objects.append(arg)
